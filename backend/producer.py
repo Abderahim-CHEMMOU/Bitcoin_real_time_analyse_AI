@@ -3,52 +3,110 @@ import json
 import time
 import requests
 from datetime import datetime
+import logging
+from kafka.errors import NoBrokersAvailable
+import sys
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class BitcoinDataProducer:
-    def __init__(self, bootstrap_servers):
-        self.producer = KafkaProducer(
-            bootstrap_servers=bootstrap_servers,
-            value_serializer=lambda x: json.dumps(x).encode('utf-8')
-        )
+    def __init__(self, bootstrap_servers, max_retries=5, retry_delay=5):
+        self.bootstrap_servers = bootstrap_servers
+        self.producer = None
         self.topic = 'cryptoTopic'
+        self.max_retries = max_retries
+        self.retry_delay = retry_delay
+        self.connect()
+
+    def connect(self):
+        retries = 0
+        while retries < self.max_retries:
+            try:
+                logger.info(f"Tentative de connexion à Kafka (essai {retries + 1}/{self.max_retries})...")
+                self.producer = KafkaProducer(
+                    bootstrap_servers=self.bootstrap_servers,
+                    value_serializer=lambda x: json.dumps(x).encode('utf-8'),
+                    api_version=(0, 10, 1)
+                )
+                logger.info("Connecté à Kafka avec succès!")
+                return
+            except NoBrokersAvailable:
+                retries += 1
+                if retries < self.max_retries:
+                    logger.warning(f"Impossible de se connecter à Kafka. Nouvelle tentative dans {self.retry_delay} secondes...")
+                    time.sleep(self.retry_delay)
+                else:
+                    logger.error("Impossible de se connecter à Kafka après plusieurs tentatives.")
+                    raise
 
     def get_bitcoin_data(self):
         try:
-            # Récupération des données via CoinGecko
-            response = requests.get(
-                'https://api.coingecko.com/api/v3/simple/price',
+            # Récupération du carnet d'ordres de Binance
+            response_orderbook = requests.get('https://api.binance.com/api/v3/ticker/bookTicker', params={'symbol': 'BTCUSDT'})
+            orderbook_data = response_orderbook.json()
+            
+            # Récupération des données de marché de CoinGecko
+            response_market = requests.get(
+                'https://api.coingecko.com/api/v3/coins/markets',
                 params={
+                    'vs_currency': 'usd',
                     'ids': 'bitcoin',
-                    'vs_currencies': 'usd',
-                    'include_24hr_vol': True,
-                    'include_last_updated_at': True
+                    'order': 'market_cap_desc',
+                    'per_page': 1,
+                    'page': 1,
+                    'sparkline': False
                 }
             )
-            data = response.json()['bitcoin']
+            market_data = response_market.json()[0]
             
-            # Création du message
+            current_time = datetime.now().isoformat()
+            
             message = {
-                'timestamp': datetime.now().isoformat(),
-                'price_usd': data['usd'],
-                'volume_24h': data.get('usd_24h_vol', 0),
-                'last_updated': data['last_updated_at']
+                'timestamp': current_time,
+                'bid_price': float(orderbook_data['bidPrice']),  # Prix d'achat (meilleure offre d'achat)
+                'ask_price': float(orderbook_data['askPrice']),  # Prix de vente (meilleure offre de vente)
+                'bid_qty': float(orderbook_data['bidQty']),      # Quantité disponible à l'achat
+                'ask_qty': float(orderbook_data['askQty']),      # Quantité disponible à la vente
+                'volume_24h': market_data['total_volume'],
+                'market_cap': market_data['market_cap'],
+                'price_change_24h': market_data['price_change_24h'],
+                'price_change_percentage_24h': market_data['price_change_percentage_24h'],
+                'high_24h': market_data['high_24h'],
+                'low_24h': market_data['low_24h'],
+                'trade_timestamp': int(time.time())
             }
+            
+            logger.info(f"Données récupérées avec succès: {message}")
             return message
+            
         except Exception as e:
-            print(f"Erreur lors de la récupération des données: {e}")
+            logger.error(f"Erreur lors de la récupération des données: {str(e)}")
             return None
 
     def start_producing(self, interval=60):
         while True:
-            data = self.get_bitcoin_data()
-            if data:
-                try:
+            try:
+                data = self.get_bitcoin_data()
+                if data and self.producer:
                     self.producer.send(self.topic, value=data)
-                    print(f"Données envoyées: {data}")
-                except Exception as e:
-                    print(f"Erreur lors de l'envoi des données: {e}")
-            time.sleep(interval)  # Attendre 60 secondes avant la prochaine requête
+                    logger.info(f"Données envoyées: {data}")
+                time.sleep(interval)
+            except Exception as e:
+                logger.error(f"Erreur lors de l'envoi des données: {e}")
+                try:
+                    self.connect()  # Tentative de reconnexion
+                except Exception as conn_error:
+                    logger.error(f"Échec de la reconnexion: {conn_error}")
+                    time.sleep(interval)
 
 if __name__ == "__main__":
-    producer = BitcoinDataProducer(bootstrap_servers=['kafka:9092'])
-    producer.start_producing()
+    try:
+        producer = BitcoinDataProducer(bootstrap_servers=['kafka:9092'])
+        producer.start_producing()
+    except KeyboardInterrupt:
+        logger.info("Arrêt du producer...")
+        sys.exit(0)
+    except Exception as e:
+        logger.error(f"Erreur fatale: {e}")
+        sys.exit(1)
