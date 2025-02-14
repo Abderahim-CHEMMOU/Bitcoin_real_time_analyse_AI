@@ -1,45 +1,51 @@
-# Utilisation d'une image Python avec Java préinstallé
-FROM openjdk:11-slim-buster
+# Utiliser une image avec Java et Python préinstallés
+FROM jupyter/pyspark-notebook:spark-3.3.0
 
-# Installation des dépendances système et Python
+USER root
+
+# Installation des dépendances système
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-    python3 \
-    python3-pip \
-    python3-setuptools \
-    python3-wheel \
+    build-essential \
     wget \
+    libopenblas-dev \
+    liblapack-dev \
+    gfortran \
+    pkg-config \
+    libfreetype6-dev \
     gcc \
     g++ \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Configuration de Java
-ENV JAVA_HOME=/usr/local/openjdk-11
-ENV PATH=$PATH:$JAVA_HOME/bin
-
-# Installation de Spark
-ENV SPARK_VERSION=3.3.0
-ENV HADOOP_VERSION=3
-ENV SPARK_HOME=/opt/spark
-ENV PATH=$PATH:$SPARK_HOME/bin
+# Configuration de l'environnement
+ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+ENV SPARK_HOME=/usr/local/spark
+ENV PATH=$PATH:$SPARK_HOME/bin:$JAVA_HOME/bin
 ENV PYTHONPATH=$SPARK_HOME/python:$SPARK_HOME/python/lib/py4j-0.10.9.5-src.zip:$PYTHONPATH
+ENV PYSPARK_PYTHON=python3
+ENV PYSPARK_DRIVER_PYTHON=python3
 
-# Copier d'abord requirements.txt pour profiter du cache Docker
+# Configuration Spark
+ENV SPARK_OPTS="--driver-java-options=-Xms1024M --driver-java-options=-Xmx4096M --driver-java-options=-Dlog4j.logLevel=info"
+
 WORKDIR /app
+
+# Copier requirements.txt
 COPY requirements.txt .
 
-# Installation des dépendances Python avec pip
-RUN pip3 install --no-cache-dir -r requirements.txt
+# Installation des dépendances Python
+RUN python3 -m pip install --no-cache-dir --upgrade pip && \
+    python3 -m pip install --no-cache-dir -r requirements.txt
 
-# Téléchargement et installation de Spark
-RUN wget -q https://archive.apache.org/dist/spark/spark-${SPARK_VERSION}/spark-${SPARK_VERSION}-bin-hadoop${HADOOP_VERSION}.tgz && \
-    tar xzf spark-${SPARK_VERSION}-bin-hadoop${HADOOP_VERSION}.tgz && \
-    mv spark-${SPARK_VERSION}-bin-hadoop${HADOOP_VERSION} /opt/spark && \
-    rm spark-${SPARK_VERSION}-bin-hadoop${HADOOP_VERSION}.tgz
+# Vérifier les installations
+RUN which java && \
+    java -version && \
+    python3 -c "import pyspark; print('PySpark version:', pyspark.__version__)"
 
 # Copier le reste des fichiers
 COPY . .
 
-# Commande de démarrage (sera écrasée par le docker-compose)
+USER $NB_UID
+
 CMD ["python3", "producer.py"]

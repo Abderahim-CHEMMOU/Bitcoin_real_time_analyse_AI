@@ -140,3 +140,18 @@ docker-compose logs -f spark-streaming
    - Agrégations horaires
    - Tendances de prix
    - Variations de volume
+
+# Données
+
+/bitcoin/
+├── raw_data/
+│   ├── part-00000-xxxxx.parquet  # Données brutes par batch
+│   ├── part-00001-xxxxx.parquet
+│   └── _SUCCESS                  # Marqueur de succès
+├── hourly_metrics/
+│   ├── part-00000-xxxxx.parquet  # Métriques agrégées
+│   └── _SUCCESS
+└── checkpoints/
+    ├── offsets/                  # Position dans Kafka
+    ├── commits/                  # Commits des transactions
+    └── sources/                  # État des sources
