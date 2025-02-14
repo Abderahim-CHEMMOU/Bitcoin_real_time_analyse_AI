@@ -137,12 +137,28 @@ services:
     restart: always
     depends_on:
       kafka:
-        condition: service_healthy  # Ajoutez cette ligne
+        condition: service_healthy 
     volumes:
       - ./data:/data
-      - ./backend:/app  # Ajoutez cette ligne pour le développement
+      - ./backend:/app 
     environment:
       - BOOTSTRAP_SERVERS=kafka:9092
+
+  spark-streaming:
+    build: ./backend
+    container_name: spark-streaming
+    depends_on:
+      namenode:
+        condition: service_started
+      kafka:
+        condition: service_healthy
+      spark-master:
+        condition: service_started
+    environment:
+      - SPARK_MASTER=spark://spark-master:7077
+    volumes:
+      - ./backend:/app
+    command: ["python3", "spark_streaming.py"]
 
   # kafka-consumer:
   #   build: ./backend
