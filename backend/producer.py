@@ -5,32 +5,36 @@ import requests
 from datetime import datetime
 
 class BitcoinDataProducer:
-    def __init__(self, bootstrap_servers):
+    def __init__(self, bootstrap_servers, api_key, topic='api_data_coingecko'):
         self.producer = KafkaProducer(
             bootstrap_servers=bootstrap_servers,
             value_serializer=lambda x: json.dumps(x).encode('utf-8')
         )
-        self.topic = 'cryptoTopic'
+        self.topic = topic
+        self.api_key = api_key
 
     def get_bitcoin_data(self):
         try:
-            # Récupération des données via CoinGecko
             response = requests.get(
                 'https://api.coingecko.com/api/v3/simple/price',
                 params={
                     'ids': 'bitcoin',
                     'vs_currencies': 'usd',
-                    'include_24hr_vol': True,
-                    'include_last_updated_at': True
+                    'include_market_cap': 'true',
+                    'include_24hr_vol': 'true',
+                    'include_24hr_change': 'true',
+                    'include_last_updated_at': 'true',
+                    'x_cg_api_key': self.api_key
                 }
             )
+            response.raise_for_status()
             data = response.json()['bitcoin']
-            
-            # Création du message
             message = {
                 'timestamp': datetime.now().isoformat(),
                 'price_usd': data['usd'],
-                'volume_24h': data.get('usd_24h_vol', 0),
+                'market_cap_usd': data.get('usd_market_cap', 0),
+                'volume_24h_usd': data.get('usd_24h_vol', 0),
+                'change_24h_usd': data.get('usd_24h_change', 0),
                 'last_updated': data['last_updated_at']
             }
             return message
@@ -38,8 +42,8 @@ class BitcoinDataProducer:
             print(f"Erreur lors de la récupération des données: {e}")
             return None
 
-    def start_producing(self, interval=60):
-        while True:
+    def start_producing(self, interval=90, max_requests=20):
+        for i in range(max_requests):
             data = self.get_bitcoin_data()
             if data:
                 try:
@@ -47,8 +51,9 @@ class BitcoinDataProducer:
                     print(f"Données envoyées: {data}")
                 except Exception as e:
                     print(f"Erreur lors de l'envoi des données: {e}")
-            time.sleep(interval)  # Attendre 60 secondes avant la prochaine requête
+            time.sleep(interval)
 
 if __name__ == "__main__":
-    producer = BitcoinDataProducer(bootstrap_servers=['kafka:9092'])
+    API_KEY = 'CG-NC8kDN1R1Ej428kKe3qnEquD'
+    producer = BitcoinDataProducer(bootstrap_servers=['kafka:9092'], api_key=API_KEY)
     producer.start_producing()

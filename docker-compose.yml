@@ -123,9 +123,11 @@ services:
       - ./data:/data
     environment:
       - FLASK_ENV=development
+      - BOOTSTRAP_SERVERS=kafka:9092
     depends_on:
       - kafka
       - zookeeper
+    command: ["python", "producer.py"]
   
   kafka-producer:
     build: ./backend
@@ -135,6 +137,7 @@ services:
       - kafka
     volumes:
       - ./data:/data
+      - ./backend:/app
     environment:
       - BOOTSTRAP_SERVERS=kafka:9092
 
@@ -146,7 +149,7 @@ services:
       - kafka
     environment:
       - BOOTSTRAP_SERVERS=kafka:9092
-    command: ["python", "consumer.py"]
+    command: ["python"]
 
 
   hive-metastore:
