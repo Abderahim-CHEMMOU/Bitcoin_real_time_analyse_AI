@@ -42,8 +42,12 @@ class BitcoinDataProducer:
 
     def get_bitcoin_data(self):
         try:
-            # Utilisation de l'endpoint markets qui fournit toutes les données dont nous avons besoin
-            response = requests.get(
+            # Récupération du carnet d'ordres de Binance
+            response_orderbook = requests.get('https://api.binance.com/api/v3/ticker/bookTicker', params={'symbol': 'BTCUSDT'})
+            orderbook_data = response_orderbook.json()
+            
+            # Récupération des données de marché de CoinGecko
+            response_market = requests.get(
                 'https://api.coingecko.com/api/v3/coins/markets',
                 params={
                     'vs_currency': 'usd',
@@ -54,24 +58,22 @@ class BitcoinDataProducer:
                     'sparkline': False
                 }
             )
-            
-            if response.status_code != 200:
-                logger.error(f"Erreur API CoinGecko: {response.status_code}")
-                return None
-                
-            data = response.json()[0]  # Premier élément car nous ne demandons que Bitcoin
+            market_data = response_market.json()[0]
             
             current_time = datetime.now().isoformat()
             
             message = {
                 'timestamp': current_time,
-                'price_usd': data['current_price'],
-                'volume_24h': data['total_volume'],
-                'market_cap': data['market_cap'],
-                'price_change_24h': data['price_change_24h'],
-                'price_change_percentage_24h': data['price_change_percentage_24h'],
-                'high_24h': data['high_24h'],
-                'low_24h': data['low_24h'],
+                'bid_price': float(orderbook_data['bidPrice']),  # Prix d'achat (meilleure offre d'achat)
+                'ask_price': float(orderbook_data['askPrice']),  # Prix de vente (meilleure offre de vente)
+                'bid_qty': float(orderbook_data['bidQty']),      # Quantité disponible à l'achat
+                'ask_qty': float(orderbook_data['askQty']),      # Quantité disponible à la vente
+                'volume_24h': market_data['total_volume'],
+                'market_cap': market_data['market_cap'],
+                'price_change_24h': market_data['price_change_24h'],
+                'price_change_percentage_24h': market_data['price_change_percentage_24h'],
+                'high_24h': market_data['high_24h'],
+                'low_24h': market_data['low_24h'],
                 'trade_timestamp': int(time.time())
             }
             
@@ -108,3 +110,4 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(f"Erreur fatale: {e}")
         sys.exit(1)
+
