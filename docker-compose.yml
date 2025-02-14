@@ -99,10 +99,14 @@ services:
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,INTERNAL:PLAINTEXT
       KAFKA_LISTENERS: PLAINTEXT://:9092,INTERNAL://:9093
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092, INTERNAL://kafka:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,INTERNAL://kafka:9093
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_CREATE_TOPICS: "topic1:1:1,topic2:1:1,cryptoTopic:1:1"
-      KAFKA_LOG_RETENTION_BYTES: 1073741824
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics.sh --bootstrap-server kafka:9092 --list"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     depends_on:
       - zookeeper
 
@@ -134,22 +138,23 @@ services:
     container_name: kafka-producer
     restart: always
     depends_on:
-      - kafka
+      kafka:
+        condition: service_healthy  # Ajoutez cette ligne
     volumes:
       - ./data:/data
-      - ./backend:/app
+      - ./backend:/app  # Ajoutez cette ligne pour le développement
     environment:
       - BOOTSTRAP_SERVERS=kafka:9092
 
-  kafka-consumer:
-    build: ./backend
-    container_name: kafka-consumer
-    restart: always
-    depends_on:
-      - kafka
-    environment:
-      - BOOTSTRAP_SERVERS=kafka:9092
-    command: ["python"]
+  # kafka-consumer:
+  #   build: ./backend
+  #   container_name: kafka-consumer
+  #   restart: always
+  #   depends_on:
+  #     - kafka
+  #   environment:
+  #     - BOOTSTRAP_SERVERS=kafka:9092
+  #   command: ["python", "consumer.py"]
 
 
   hive-metastore:
@@ -179,37 +184,37 @@ services:
       bash -c "hive --service hiveserver2 --hiveconf hive.metastore.uris=thrift://hive-metastore:9083"
 
 
-  superset:
-      image: apache/superset:latest
-      container_name: superset
-      user: "root"
-      environment:
-        - SUPERSET_SECRET_KEY=votre_clé_secrète
-        - SUPERSET_LOAD_EXAMPLES=no
-        - PYTHONPATH=/app/pythonpath
-      ports:
-        - "8088:8088"
-      volumes:
-        - ./superset_home:/app/superset_home
-      depends_on:
-        - redis
-        - hive-server
-      command: >
-        bash -c "apt-get update &&
-                apt-get install -y g++ libsasl2-dev python3-dev libldap2-dev libssl-dev &&
-                pip install apache-superset psycopg2-binary thrift 'pyhive[hive]' sasl thrift-sasl &&
-                pip install 'apache-superset[hive]' &&
-                superset db upgrade &&
-                superset fab create-admin --username admin --firstname Superset --lastname Admin --email admin@superset.com --password admin &&
-                superset init &&
-                superset run -h 0.0.0.0 -p 8088 --with-threads --reload --debugger"
+  # superset:
+  #     image: apache/superset:latest
+  #     container_name: superset
+  #     user: "root"
+  #     environment:
+  #       - SUPERSET_SECRET_KEY=votre_clé_secrète
+  #       - SUPERSET_LOAD_EXAMPLES=no
+  #       - PYTHONPATH=/app/pythonpath
+  #     ports:
+  #       - "8088:8088"
+  #     volumes:
+  #       - ./superset_home:/app/superset_home
+  #     depends_on:
+  #       - redis
+  #       - hive-server
+  #     command: >
+  #       bash -c "apt-get update &&
+  #               apt-get install -y g++ libsasl2-dev python3-dev libldap2-dev libssl-dev &&
+  #               pip install apache-superset psycopg2-binary thrift 'pyhive[hive]' sasl thrift-sasl &&
+  #               pip install 'apache-superset[hive]' &&
+  #               superset db upgrade &&
+  #               superset fab create-admin --username admin --firstname Superset --lastname Admin --email admin@superset.com --password admin &&
+  #               superset init &&
+  #               superset run -h 0.0.0.0 -p 8088 --with-threads --reload --debugger"
 
-  redis:
-    image: redis:latest
-    container_name: superset_redis
-    restart: always
-    ports:
-      - "6379:6379"
+  # redis:
+  #   image: redis:latest
+  #   container_name: superset_redis
+  #   restart: always
+  #   ports:
+  #     - "6379:6379"
 
 
 volumes:
