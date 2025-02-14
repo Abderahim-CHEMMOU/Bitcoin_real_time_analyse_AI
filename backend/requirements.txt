@@ -1,4 +1,10 @@
-kafka-python
-requests
-pyspark
-py4j
+kafka-python==2.0.2
+requests==2.31.0
+pyspark==3.3.0
+py4j==0.10.9.5
+tensorflow==2.11.0
+scikit-learn==1.0.2
+matplotlib==3.5.3
+pandas==1.3.5
+numpy==1.21.6
+scipy==1.7.3

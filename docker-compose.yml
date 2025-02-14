@@ -160,6 +160,22 @@ services:
       - ./backend:/app
     command: ["python3", "spark_streaming.py"]
 
+  bitcoin-prediction:
+    build: 
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: bitcoin-prediction
+    depends_on:
+      - namenode
+    environment:
+      - PYSPARK_PYTHON=python3
+      - PYSPARK_DRIVER_PYTHON=python3
+      - JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+      - SPARK_OPTS="--driver-java-options=-Xms1024M --driver-java-options=-Xmx4096M --driver-java-options=-Dlog4j.logLevel=info"
+    volumes:
+      - ./backend:/app
+    command: ["python3", "prediction.py"]
+
   # kafka-consumer:
   #   build: ./backend
   #   container_name: kafka-consumer
