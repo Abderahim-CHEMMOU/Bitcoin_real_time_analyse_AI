@@ -1,0 +1,217 @@
+
+
+services:
+  namenode:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    container_name: namenode
+    restart: always
+    ports:
+      - 9870:9870
+      - 9000:9000
+    volumes:
+      - hadoop_namenode:/hadoop/dfs/name
+      - ./data:/data
+    environment:
+      - CLUSTER_NAME=test
+    env_file:
+      - ./hadoop.env
+
+  datanode:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: datanode
+    restart: always
+    volumes:
+      - hadoop_datanode:/hadoop/dfs/data
+    environment:
+      SERVICE_PRECONDITION: "namenode:9870"
+    env_file:
+      - ./hadoop.env
+
+  resourcemanager:
+    image: bde2020/hadoop-resourcemanager:2.0.0-hadoop3.2.1-java8
+    container_name: resourcemanager
+    restart: always
+    environment:
+      SERVICE_PRECONDITION: "namenode:9000 namenode:9870 datanode:9864"
+    env_file:
+      - ./hadoop.env
+
+  nodemanager1:
+    image: bde2020/hadoop-nodemanager:2.0.0-hadoop3.2.1-java8
+    container_name: nodemanager
+    restart: always
+    environment:
+      SERVICE_PRECONDITION: "namenode:9000 namenode:9870 datanode:9864 resourcemanager:8088"
+    env_file:
+      - ./hadoop.env
+
+  historyserver:
+    image: bde2020/hadoop-historyserver:2.0.0-hadoop3.2.1-java8
+    container_name: historyserver
+    restart: always
+    environment:
+      SERVICE_PRECONDITION: "namenode:9000 namenode:9870 datanode:9864 resourcemanager:8088"
+    volumes:
+      - hadoop_historyserver:/hadoop/yarn/timeline
+    env_file:
+      - ./hadoop.env
+
+  spark-master:
+    image: bde2020/spark-master:3.3.0-hadoop3.3
+    container_name: spark-master
+    ports:
+      - "8080:8080"
+      - "7077:7077"
+    volumes:
+      - ./app:/app
+      - ./hive-site.xml:/spark/conf/hive-site.xml
+    environment:
+      - INIT_DAEMON_STEP=setup_spark
+      - PATH=/spark/bin:$PATH
+      - SPARK_MASTER_HOST=spark-master
+      - SPARK_MASTER_PORT=7077
+      - SPARK_CONF_DIR=/spark/conf
+      - SPARK_OPTS="--driver-java-options=-Dderby.system.home=/tmp/derby"
+      - SPARK_HIVE_ENABLED=true
+      - SPARK_HADOOP_HIVE_METASTORE_URI=thrift://hive-metastore:9083
+    depends_on:
+      - hive-metastore
+      - namenode
+      - datanode
+
+  spark-worker-1:
+    image: bde2020/spark-worker:3.3.0-hadoop3.3
+    container_name: spark-worker-1
+    depends_on:
+      - spark-master
+    ports:
+      - "8081:8081"
+    environment:
+      - SPARK_MASTER=spark://spark-master:7077
+      - PATH=/spark/bin:$PATH
+
+  kafka:
+    image: wurstmeister/kafka
+    container_name: kafka
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,INTERNAL:PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://:9092,INTERNAL://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092, INTERNAL://kafka:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CREATE_TOPICS: "topic1:1:1,topic2:1:1,cryptoTopic:1:1"
+      KAFKA_LOG_RETENTION_BYTES: 1073741824
+    depends_on:
+      - zookeeper
+
+  zookeeper:
+    image: zookeeper
+    container_name: zookeeper
+    ports:
+      - "2181:2181"
+
+  backend:
+    build: ./backend
+    container_name: backend
+    restart: always
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./backend:/backend
+      - ./data:/data
+    environment:
+      - FLASK_ENV=development
+    depends_on:
+      - kafka
+      - zookeeper
+  
+  kafka-producer:
+    build: ./backend
+    container_name: kafka-producer
+    restart: always
+    depends_on:
+      - kafka
+    volumes:
+      - ./data:/data
+    environment:
+      - BOOTSTRAP_SERVERS=kafka:9092
+
+  kafka-consumer:
+    build: ./backend
+    container_name: kafka-consumer
+    restart: always
+    depends_on:
+      - kafka
+    environment:
+      - BOOTSTRAP_SERVERS=kafka:9092
+    command: ["python", "consumer.py"]
+
+
+  hive-metastore:
+    image: apache/hive:4.0.0
+    container_name: hive-metastore
+    ports:
+      - "9083:9083"
+    environment:
+      - SERVICE_NAME=metastore
+    command: >
+      bash -c "hive --service metastore"
+
+  hive-server:
+    image: apache/hive:4.0.0
+    container_name: hive-server
+    depends_on:
+      - hive-metastore
+      - namenode
+      - datanode
+    ports:
+      - "10000:10000"
+      - "10002:10002"
+    environment:
+      - SERVICE_NAME=hiveserver2
+      - HIVE_SITE_CONF=/opt/hive/conf
+    command: >
+      bash -c "hive --service hiveserver2 --hiveconf hive.metastore.uris=thrift://hive-metastore:9083"
+
+
+  superset:
+      image: apache/superset:latest
+      container_name: superset
+      user: "root"
+      environment:
+        - SUPERSET_SECRET_KEY=votre_clé_secrète
+        - SUPERSET_LOAD_EXAMPLES=no
+        - PYTHONPATH=/app/pythonpath
+      ports:
+        - "8088:8088"
+      volumes:
+        - ./superset_home:/app/superset_home
+      depends_on:
+        - redis
+        - hive-server
+      command: >
+        bash -c "apt-get update &&
+                apt-get install -y g++ libsasl2-dev python3-dev libldap2-dev libssl-dev &&
+                pip install apache-superset psycopg2-binary thrift 'pyhive[hive]' sasl thrift-sasl &&
+                pip install 'apache-superset[hive]' &&
+                superset db upgrade &&
+                superset fab create-admin --username admin --firstname Superset --lastname Admin --email admin@superset.com --password admin &&
+                superset init &&
+                superset run -h 0.0.0.0 -p 8088 --with-threads --reload --debugger"
+
+  redis:
+    image: redis:latest
+    container_name: superset_redis
+    restart: always
+    ports:
+      - "6379:6379"
+
+
+volumes:
+  hadoop_namenode:
+  hadoop_datanode:
+  hadoop_historyserver:
+  redis_data:
+  superset_home:
