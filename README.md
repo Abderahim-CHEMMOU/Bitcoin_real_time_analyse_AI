@@ -1,179 +1,137 @@
-# Bitcoin_real_time_analyse_AI
+# Pipeline de Données Bitcoin en Temps Réel
 
-# Traitement en Temps Réel des Données Bitcoin
+Un système de traitement de données pour collecter, analyser et prédire les prix du Bitcoin en utilisant une architecture Big Data moderne.
 
-Ce projet implémente un pipeline de traitement en temps réel des données Bitcoin utilisant Apache Kafka et Apache Spark Streaming. Les données sont collectées depuis les APIs Binance et CoinGecko, puis traitées et stockées dans HDFS.
+## Architecture
 
-## Architecture du Système
+Ce projet utilise une architecture Lambda pour traiter les données :
+- **Ingestion en temps réel** : Collecte depuis les APIs Binance et CoinGecko
+- **Traitement en temps réel** : Transformation et agrégation avec Spark Streaming
+- **Stockage distribué** : Persistance des données sur HDFS
+- **Analyse prédictive** : Modèle LSTM pour prédire les prix futurs
 
-```
-Binance/CoinGecko API → Kafka Producer → Kafka → Spark Streaming → HDFS
-```
+![Architecture](architecture_diagram.png)
 
 ## Composants
 
-### 1. Kafka Producer (`producer.py`)
-- Collecte les données en temps réel depuis :
-  - Binance API (prix bid/ask)
-  - CoinGecko API (métriques de marché)
-- Fréquence de collecte : toutes les 60 secondes
-- Données collectées :
-  - Prix d'achat (bid)
-  - Prix de vente (ask)
-  - Volume sur 24h
-  - Capitalisation boursière
-  - Variations de prix
-  - Et plus...
+Le système comprend les composants suivants :
 
-### 2. Spark Streaming (`spark_streaming.py`)
-- Consomme les données depuis Kafka
-- Effectue des transformations en temps réel :
-  - Calcul du spread (différence prix achat/vente)
-  - Prix moyen du marché
-  - Liquidité totale
-  - Volatilité des prix
-- Stocke les données dans HDFS :
-  - Données brutes enrichies
-  - Métriques agrégées par heure
+1. **Kafka Producer** (`producer.py`) :
+   - Collecte les données des APIs Binance et CoinGecko
+   - Publie les données au format JSON dans le topic Kafka "cryptoTopic"
+   - Fonctionne en continu avec un intervalle de rafraîchissement configurable
+
+2. **Spark Streaming** (`spark_streaming.py`) :
+   - Consomme les données de Kafka
+   - Transforme et enrichit les données (calcul de spread, volatilité, etc.)
+   - Stocke les données brutes dans HDFS
+   - Agrège les métriques par minute (regroupées par heure)
+   - Utilise des checkpoints pour assurer la tolérance aux pannes
+
+3. **Modèle de Prédiction** (`prediction.py`) :
+   - Charge les données agrégées depuis HDFS
+   - Entraîne un modèle LSTM avec TensorFlow
+   - Prédit les prix pour les 24 prochaines heures
+   - Sauvegarde les prédictions et les métriques de performance
+
+4. **Infrastructure** :
+   - Hadoop (HDFS + YARN) pour le stockage et la gestion des ressources
+   - Kafka pour la messagerie
+   - Spark pour le traitement distribué
+   - Hive pour l'analyse SQL (optionnel)
 
 ## Structure des Données
 
-### Données Brutes
-```python
-{
-    "timestamp": "2025-02-14T10:58:36.701397",
-    "bid_price": 97017.57,
-    "ask_price": 97017.58,
-    "bid_qty": 0.10025,
-    "ask_qty": 7.11458,
-    "volume_24h": 30381193367,
-    "market_cap": 1923087506901,
-    "price_change_24h": 887.8,
-    "price_change_percentage_24h": 0.92345,
-    "high_24h": 97231,
-    "low_24h": 95410,
-    "trade_timestamp": 1739530716
-}
-```
+Le pipeline utilise la structure de répertoires HDFS suivante :
 
-### Métriques Calculées
-- Métriques horaires :
-  - Prix moyen
-  - Spread moyen
-  - Liquidité totale
-  - Volatilité moyenne
-  - Volume moyen
-  - Prix haut/bas
-
-## Installation et Configuration
-
-1. **Prérequis**
-   - Docker et Docker Compose
-   - Python 3.9+
-   - Apache Kafka
-   - Apache Spark 3.3.0
-   - Apache Hadoop 3.3.2
-
-2. **Configuration**
-   - Installer les dépendances Python :
-     ```bash
-     pip install -r requirements.txt
-     ```
-   - Les fichiers de configuration se trouvent dans :
-     - `config/` pour Hadoop
-     - `hadoop.env` pour les variables d'environnement
-
-3. **Démarrage**
-   ```bash
-   docker-compose up -d
-   ```
-
-## Structure HDFS
-
-Les données sont stockées dans HDFS selon la structure suivante :
 ```
 /bitcoin/
-  ├── raw_data/        # Données brutes enrichies (format Parquet)
-  ├── hourly_metrics/  # Métriques agrégées par heure
-  └── checkpoints/     # Points de contrôle Spark Streaming
+  |- raw_data/           # Données brutes transformées (par minute)
+  |- hourly_metrics/     # Métriques agrégées par heure (mais générées par minute)
+  |- predictions/        # Prédictions historiques avec métriques de performance
+  |- future_predictions/ # Prédictions pour les 24 prochaines heures
+  |- prediction_metrics/ # Métriques de performance du modèle
+  |- checkpoints/        # Points de contrôle pour la reprise après panne
+     |- raw/             # Checkpoints pour le flux de données brutes
+     |- metrics/         # Checkpoints pour le flux de métriques agrégées
 ```
 
-## Vérification des Données
+## Détails techniques
 
-Pour vérifier les données stockées dans HDFS :
+### Format des données
+
+Les données collectées incluent :
+- Prix d'achat/vente (bid/ask)
+- Volumes disponibles
+- Volume de trading sur 24h
+- Capitalisation du marché
+- Variations de prix
+
+### Métriques calculées
+
+Le pipeline calcule en temps réel :
+- Spread (écart entre achat et vente)
+- Pourcentage de spread
+- Prix moyen (mid_price)
+- Liquidité totale
+- Volatilité des prix
+
+### Agrégation horaire
+
+Actuellement, les métriques sont agrégées par heure mais générées toutes les minutes, ce qui crée plusieurs fichiers de métriques partielles pour chaque heure. Pour une analyse complète, il est recommandé de consolider ces métriques.
+
+### Modèle prédictif
+
+Le modèle LSTM utilise :
+- Séquences de 12 points temporels (heures)
+- 8 caractéristiques par point
+- Structure à double couche LSTM avec dropout
+- Métrique d'évaluation : MSE, RMSE, MAE
+
+## Limites connues
+
+1. **Agrégation par micro-batch** : Les métriques horaires sont générées par minute, créant des vues partielles plutôt qu'une agrégation complète par heure.
+   
+2. **Safe Mode HDFS** : Au démarrage, le NameNode est en mode sécurité, ce qui peut retarder les opérations d'écriture. Le pipeline intègre des mécanismes d'attente et de réessai.
+
+3. **Perte de données Kafka** : En cas de redémarrage des conteneurs, les offsets Kafka peuvent changer. L'option `failOnDataLoss=false` permet au pipeline de continuer malgré ces changements.
+
+## Performances
+
+- Latence de traitement : ~1 minute
+- Précision du modèle : RMSE d'environ 300 points sur le prix du Bitcoin
+- Capacité : Traitement de plusieurs messages par seconde
+
+## Déploiement
+
+Le système s'exécute dans des conteneurs Docker orchestrés par Docker Compose :
+
 ```bash
-# Accéder au conteneur namenode
-docker exec -it namenode bash
+# Démarrer l'ensemble du pipeline
+docker-compose up -d
 
-# Lister les fichiers
-hdfs dfs -ls /bitcoin/raw_data
-hdfs dfs -ls /bitcoin/hourly_metrics
+# Suivre les logs des différents services
+docker logs -f kafka-producer
+docker logs -f spark-streaming
+docker logs -f bitcoin-prediction
 
-# Voir le contenu
-hdfs dfs -cat /bitcoin/hourly_metrics/*.parquet
+# Arrêter le système
+docker-compose down
 ```
 
-## Monitoring
+## Améliorations futures
 
-Les logs peuvent être consultés avec :
-```bash
-# Logs du producer Kafka
-docker-compose logs -f kafka-producer
+1. Implémentation d'une vraie agrégation horaire complète en utilisant les fenêtres temporelles Spark
+2. Ajout d'une interface utilisateur pour visualiser les prédictions
+3. Amélioration du modèle avec d'autres sources de données (sentiment, actualités)
+4. Optimisation de la gestion mémoire pour les traitements Spark
+5. Implémentation de tests automatisés et monitoring
 
-# Logs de Spark Streaming
-docker-compose logs -f spark-streaming
-```
+## Dépendances
 
-## Métriques et Analyses Disponibles
-
-1. **Métriques de Prix**
-   - Prix moyen du marché
-   - Spread bid/ask
-   - Volatilité des prix
-
-2. **Métriques de Volume**
-   - Volume de transactions sur 24h
-   - Liquidité disponible
-   - Capitalisation boursière
-
-3. **Analyses Temporelles**
-   - Agrégations horaires
-   - Tendances de prix
-   - Variations de volume
-
-# Données
-
-/bitcoin/
-├── raw_data/
-│   ├── part-00000-xxxxx.parquet  # Données brutes par batch
-│   ├── part-00001-xxxxx.parquet
-│   └── _SUCCESS                  # Marqueur de succès
-├── hourly_metrics/
-│   ├── part-00000-xxxxx.parquet  # Métriques agrégées
-│   └── _SUCCESS
-└── checkpoints/
-    ├── offsets/                  # Position dans Kafka
-    ├── commits/                  # Commits des transactions
-    └── sources/                  # État des sources
-
-
-/bitcoin/checkpoints/
-├── commits/                  # Journal des transactions
-│   ├── 0
-│   ├── 1
-│   └── latest
-├── offsets/                 # Position dans Kafka
-│   ├── 0
-│   ├── 1
-│   └── latest
-├── sources/                 # État des sources
-└── state/                   # État de la requête
-
-
-{
-    "topic": "cryptoTopic",
-    "partition": 0,
-    "fromOffset": 1234,
-    "untilOffset": 5678
-}
-
+- Python 3.8+
+- Apache Spark 3.3.0
+- Apache Kafka
+- Apache Hadoop 3.2.1
+- TensorFlow 2.11.0
+- Docker & Docker Compose
