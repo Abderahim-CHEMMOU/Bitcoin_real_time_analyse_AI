@@ -69,6 +69,11 @@ def define_schema():
 
 def process_batch(df, epoch_id):
     try:
+        # Vérifier si le DataFrame n'est pas vide
+        if df.rdd.isEmpty():
+            logger.info(f"Batch {epoch_id} est vide, aucun traitement nécessaire")
+            return
+
         # Calculer les métriques agrégées par heure
         hourly_metrics = df \
             .groupBy("date", "hour") \
@@ -97,60 +102,86 @@ def process_batch(df, epoch_id):
         logger.error(f"Erreur lors du traitement du batch {epoch_id}: {str(e)}")
 
 def start_streaming():
-    spark = create_spark_session()
+    MAX_RETRIES = 5
+    retry_count = 0
+    
+    while retry_count < MAX_RETRIES:
+        try:
+            spark = create_spark_session()
 
-    # Attendre que le NameNode soit prêt
-    if not wait_for_namenode(spark):
-        logger.error("Impossible de se connecter au NameNode après plusieurs tentatives")
-        return
+            # Attendre que le NameNode soit prêt
+            if not wait_for_namenode(spark):
+                logger.error("Impossible de se connecter au NameNode après plusieurs tentatives")
+                return
 
-    schema = define_schema()
+            schema = define_schema()
 
-    # Lecture du flux Kafka
-    df_stream = spark \
-        .readStream \
-        .format("kafka") \
-        .option("kafka.bootstrap.servers", "kafka:9092") \
-        .option("subscribe", "cryptoTopic") \
-        .option("startingOffsets", "latest") \
-        .load()
+            # Lecture du flux Kafka
+            df_stream = spark \
+                .readStream \
+                .format("kafka") \
+                .option("kafka.bootstrap.servers", "kafka:9092") \
+                .option("subscribe", "cryptoTopic") \
+                .option("startingOffsets", "latest") \
+                .option("failOnDataLoss", "false") \
+                .option("maxOffsetsPerTrigger", "1000") \
+                .load()
 
-    # Parsing et transformation des données
-    parsed_df = df_stream \
-        .select(from_json(col("value").cast("string"), schema).alias("data")) \
-        .select("data.*")
+            # Parsing et transformation des données
+            parsed_df = df_stream \
+                .select(from_json(col("value").cast("string"), schema).alias("data")) \
+                .select("data.*")
 
-    # Ajout des colonnes calculées
-    transformed_df = parsed_df \
-        .withColumn("timestamp", to_timestamp("timestamp")) \
-        .withColumn("date", to_date("timestamp")) \
-        .withColumn("hour", hour("timestamp")) \
-        .withColumn("spread", col("ask_price") - col("bid_price")) \
-        .withColumn("mid_price", (col("ask_price") + col("bid_price")) / 2) \
-        .withColumn("spread_percentage", (col("spread") / col("mid_price")) * 100) \
-        .withColumn("total_liquidity", col("bid_qty") + col("ask_qty")) \
-        .withColumn("price_volatility", (col("high_24h") - col("low_24h")) / col("mid_price") * 100)
+            # Ajout des colonnes calculées
+            transformed_df = parsed_df \
+                .withColumn("timestamp", to_timestamp("timestamp")) \
+                .withColumn("date", to_date("timestamp")) \
+                .withColumn("hour", hour("timestamp")) \
+                .withColumn("spread", col("ask_price") - col("bid_price")) \
+                .withColumn("mid_price", (col("ask_price") + col("bid_price")) / 2) \
+                .withColumn("spread_percentage", (col("spread") / col("mid_price")) * 100) \
+                .withColumn("total_liquidity", col("bid_qty") + col("ask_qty")) \
+                .withColumn("price_volatility", (col("high_24h") - col("low_24h")) / col("mid_price") * 100)
 
-    # Écriture des données brutes
-    query_raw = transformed_df \
-        .writeStream \
-        .outputMode("append") \
-        .format("parquet") \
-        .option("path", "hdfs://namenode:9000/bitcoin/raw_data") \
-        .option("checkpointLocation", "hdfs://namenode:9000/bitcoin/checkpoints/raw") \
-        .start()
+            # Écriture des données brutes avec checkpoint robuste
+            query_raw = transformed_df \
+                .writeStream \
+                .outputMode("append") \
+                .format("parquet") \
+                .option("path", "hdfs://namenode:9000/bitcoin/raw_data") \
+                .option("checkpointLocation", "hdfs://namenode:9000/bitcoin/checkpoints/raw") \
+                .start()
 
-    # Écriture des métriques agrégées
-    query_metrics = transformed_df \
-        .writeStream \
-        .trigger(processingTime='1 minute') \
-        .foreachBatch(process_batch) \
-        .start()
+            # Écriture des métriques agrégées avec checkpoint distinct
+            query_metrics = transformed_df \
+                .writeStream \
+                .trigger(processingTime='1 minute') \
+                .foreachBatch(process_batch) \
+                .option("checkpointLocation", "hdfs://namenode:9000/bitcoin/checkpoints/metrics") \
+                .start()
 
-    # Attendre que les requêtes se terminent
-    query_raw.awaitTermination()
-    query_metrics.awaitTermination()
+            # Attendre que les requêtes se terminent
+            query_raw.awaitTermination()
+            query_metrics.awaitTermination()
+            
+            break  # Sortir de la boucle si tout fonctionne
+            
+        except Exception as e:
+            retry_count += 1
+            logger.error(f"Erreur dans le job streaming: {str(e)}")
+            if retry_count < MAX_RETRIES:
+                wait_time = 10 * retry_count  # Augmenter le temps d'attente à chaque tentative
+                logger.info(f"Tentative de redémarrage {retry_count}/{MAX_RETRIES} dans {wait_time} secondes...")
+                time.sleep(wait_time)
+            else:
+                logger.error("Nombre maximum de tentatives atteint. Arrêt du job.")
+                raise
 
 if __name__ == "__main__":
     logger.info("Démarrage du job Spark Streaming...")
-    start_streaming()
+    try:
+        start_streaming()
+    except KeyboardInterrupt:
+        logger.info("Arrêt manuel du job Spark Streaming")
+    except Exception as e:
+        logger.error(f"Erreur fatale: {str(e)}")
