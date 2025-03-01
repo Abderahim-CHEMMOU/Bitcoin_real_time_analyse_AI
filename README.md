@@ -155,3 +155,25 @@ docker-compose logs -f spark-streaming
     ├── offsets/                  # Position dans Kafka
     ├── commits/                  # Commits des transactions
     └── sources/                  # État des sources
+
+
+/bitcoin/checkpoints/
+├── commits/                  # Journal des transactions
+│   ├── 0
+│   ├── 1
+│   └── latest
+├── offsets/                 # Position dans Kafka
+│   ├── 0
+│   ├── 1
+│   └── latest
+├── sources/                 # État des sources
+└── state/                   # État de la requête
+
+
+{
+    "topic": "cryptoTopic",
+    "partition": 0,
+    "fromOffset": 1234,
+    "untilOffset": 5678
+}
+

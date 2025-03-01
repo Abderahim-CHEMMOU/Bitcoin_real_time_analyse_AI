@@ -84,7 +84,7 @@ class BitcoinDataProducer:
             logger.error(f"Erreur lors de la récupération des données: {str(e)}")
             return None
 
-    def start_producing(self, interval=60):
+    def start_producing(self, interval=30):
         while True:
             try:
                 data = self.get_bitcoin_data()

@@ -15,6 +15,12 @@ services:
       - CLUSTER_NAME=test
     env_file:
       - ./hadoop.env
+    healthcheck:
+      test: ["CMD", "hdfs", "dfsadmin", "-safemode", "get"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
 
   datanode:
     image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
@@ -31,6 +37,8 @@ services:
     image: bde2020/hadoop-resourcemanager:2.0.0-hadoop3.2.1-java8
     container_name: resourcemanager
     restart: always
+    ports:
+      - "8088:8088"
     environment:
       SERVICE_PRECONDITION: "namenode:9000 namenode:9870 datanode:9864"
     env_file:
@@ -102,6 +110,8 @@ services:
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,INTERNAL://kafka:9093
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_CREATE_TOPICS: "topic1:1:1,topic2:1:1,cryptoTopic:1:1"
+      #KAFKA_LOG_RETENTION_HOURS: 48         # Conservation des logs pendant 48 heures
+      #KAFKA_LOG_RETENTION_BYTES: 1073741824 # 1 GB de logs maximum par partition
     healthcheck:
       test: ["CMD-SHELL", "kafka-topics.sh --bootstrap-server kafka:9092 --list"]
       interval: 30s
@@ -166,7 +176,8 @@ services:
       dockerfile: Dockerfile
     container_name: bitcoin-prediction
     depends_on:
-      - namenode
+      namenode:
+        condition: service_healthy
     environment:
       - PYSPARK_PYTHON=python3
       - PYSPARK_DRIVER_PYTHON=python3
