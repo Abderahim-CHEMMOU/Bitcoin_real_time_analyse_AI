@@ -22,7 +22,8 @@ Ce projet utilise une architecture Lambda pour traiter les données :
 - **Stockage distribué** : Persistance des données sur HDFS
 - **Analyse prédictive** : Modèle LSTM pour prédire les prix futurs
 
-![Architecture](architecture_diagram.png)
+![Architecture de pipeline de données Bitcoin en temps réel](https://github.com/user-attachments/assets/5c59fede-3068-4911-826b-a22acea5b7a7)
+
 
 ## Composants
 
