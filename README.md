@@ -2,6 +2,18 @@
 
 Un système de traitement de données pour collecter, analyser et prédire les prix du Bitcoin en utilisant une architecture Big Data moderne.
 
+## Objectif du projet
+
+L'objectif principal de ce projet est de créer un pipeline de données complet pour le trading algorithmique de Bitcoin, capable de :
+
+1. **Collecter des données en temps réel** depuis plusieurs sources (Binance, CoinGecko) pour obtenir une vue globale du marché
+2. **Traiter et enrichir ces données** avec des métriques dérivées importantes pour l'analyse financière (spread, volatilité, liquidité)
+3. **Agréger les informations par tranches horaires** pour faciliter l'analyse des tendances et réduire le bruit des fluctuations à court terme
+4. **Prédire les mouvements de prix** sur les 24 prochaines heures pour anticiper les opportunités de trading
+5. **Offrir une infrastructure robuste et tolérante aux pannes** capable de fonctionner en continu dans un environnement de production
+
+Le système est conçu pour servir de base à une stratégie de trading automatisée, avec un accent particulier sur la fiabilité, la précision des prédictions et la latence minimale entre l'acquisition des données et la génération de signaux de trading.
+
 ## Architecture
 
 Ce projet utilise une architecture Lambda pour traiter les données :
